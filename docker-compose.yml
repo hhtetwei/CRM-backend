@@ -1,0 +1,22 @@
+version: '4.2'
+services:
+  dev-db:
+    image: postgres:13
+    ports:
+      - 5433:5432
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin1234
+      POSTGRES_DB: crmdb
+    networks:
+      - crm
+  test-db:
+    image: postgres:13
+    ports:
+      - 5435:5432
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: testcrm
+      POSTGRES_DB: testcrm
+networks:
+  crm:
