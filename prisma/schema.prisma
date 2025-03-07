@@ -18,10 +18,51 @@ model User {
   id        Int      @id @default(autoincrement())
   name      String
   email     String   @unique
-  password String
-  role     Role   @default(USER)
+  password  String
+  role      Role     @default(USER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-@@map("users")
+  leads     Lead[]
+  deals     Deal[]
+}
+
+model Lead {
+  id        String   @id @default(uuid())
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  status    LeadStatus @default(NEW)
+  ownerId   Int?      
+  owner     User? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+}
+
+model Deal {
+  id               String   @id @default(uuid())
+  name             String
+  amount           Float
+  dealValue        Float?   
+  forecastValue    Float?   
+  expectedCloseDate DateTime? 
+  closeProbability Float?  
+  stage            DealStage @default(NEGOTIATION)
+  ownerId          Int?
+  owner            User? @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+}
+
+enum DealStage {
+  NEGOTIATION
+  PROPOSAL_SENT
+  CLOSED_WON
+  CLOSED_LOST
 }
