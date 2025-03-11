@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { DealStage } from '@prisma/client';
+import { DealStage, Prisma } from '@prisma/client';
 import { CreateDealDto, UpdateDealDto } from 'src/dto/deals.dto';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -12,8 +12,24 @@ export class DealsService {
   ) {}
 
   async createDeals(dto: CreateDealDto, user: number) {
-    const closeProbability =
-      dto.stage === DealStage.CLOSED_WON ? 100 : (dto.closeProbability ?? 0);
+    let closeProbability: number;
+
+    switch (dto.stage) {
+      case DealStage.PROPOSAL_SENT:
+        closeProbability = 30;
+        break;
+      case DealStage.NEGOTIATION:
+        closeProbability = 50;
+        break;
+      case DealStage.CLOSED_WON:
+        closeProbability = 100;
+        break;
+      case DealStage.CLOSED_LOST:
+        closeProbability = 0;
+        break;
+      default:
+        closeProbability = dto.closeProbability ?? 0;
+    }
 
     const dealValue = dto.dealValue ?? 0;
     const forecastValue = dealValue * (closeProbability / 100);
@@ -141,27 +157,73 @@ export class DealsService {
     });
   }
 
-  //need to fix i do not know how to do this anymore TT
-  async getMonthlyForecast() {
-    const result = await this.prisma.$queryRaw<
-      { month: string; totalForecastRevenue: bigint; dealCount: bigint }[]
-    >`
-      SELECT 
-        TO_CHAR("expectedCloseDate", 'YYYY-MM') AS month,
-        COALESCE(SUM("forecastValue"), 0) AS totalForecastRevenue,
-        COUNT(*) AS dealCount
-      FROM "Deal"
-      WHERE "expectedCloseDate" IS NOT NULL
-      GROUP BY month
-      ORDER BY month ASC;
-    `;
+  async getForecastValues(type: 'monthly' | 'yearly') {
+    const startDate = new Date();
+    startDate.setFullYear(
+      startDate.getFullYear() - (type === 'yearly' ? 11 : 1),
+    );
 
-    // Convert BigInt to Number
-    return result.map((row) => ({
-      month: row.month,
-      totalForecastRevenue: Number(row.totalForecastRevenue), // Convert BigInt
-      dealCount: Number(row.dealCount), // Convert BigInt
-    }));
+    console.log('Start Date:', startDate); // Debugging log
+
+    // Fetch the data
+    const data = await this.prisma.deal.findMany({
+      where: {
+        expectedCloseDate: { gte: startDate },
+      },
+      select: {
+        expectedCloseDate: true,
+        forecastValue: true,
+      },
+    });
+
+    console.log('Fetched Data:', data); // Debugging log
+
+    const groupedData: Record<string, number[]> = {};
+
+    // Group data by month or year and push forecast values into an array
+    data.forEach(({ expectedCloseDate, forecastValue }) => {
+      const key =
+        type === 'monthly'
+          ? expectedCloseDate.toISOString().slice(0, 7) // 'YYYY-MM'
+          : expectedCloseDate.getFullYear().toString(); // 'YYYY'
+
+      console.log('Grouping Key:', key); // Debugging log
+
+      if (!groupedData[key]) {
+        groupedData[key] = [];
+      }
+      groupedData[key].push(forecastValue);
+    });
+
+    console.log('Grouped Data:', groupedData); // Debugging log
+
+    const result: { label: string; values: number[] }[] = [];
+
+    // Prepare the final result with labels and values arrays
+    for (let i = 0; i < 12; i++) {
+      const date = new Date();
+      date.setMonth(date.getMonth() - (type === 'monthly' ? i : i * 12));
+
+      const key =
+        type === 'monthly'
+          ? date.toISOString().slice(0, 7)
+          : date.getFullYear().toString();
+
+      const label =
+        type === 'monthly'
+          ? date.toLocaleString('default', { month: 'short' }) // "Jan", "Feb", etc.
+          : date.getFullYear().toString(); // "2024", "2025", etc.
+
+      console.log('Checking Label and Key:', label, key); // Debugging log
+
+      result.unshift({
+        label,
+        values: groupedData[key] || [], // Push an empty array if no forecast value for the period
+      });
+    }
+
+    console.log('Final Result:', result); // Debugging log
+    return result;
   }
 
   async getDealStageDistribution() {
@@ -190,8 +252,6 @@ export class DealsService {
         createdAt: 'asc',
       },
     });
-
-    console.log(deals);
 
     const pipeline = {
       NEGOTIATION: [],

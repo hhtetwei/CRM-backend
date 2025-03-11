@@ -29,9 +29,9 @@ export class DealsController {
     return this.dealsService.getDeals(search);
   }
 
-  @Get('/monthly-forecast')
-  getMonthlyForecast() {
-    return this.dealsService.getMonthlyForecast();
+  @Get('forecast')
+  async getForecast(@Query('type') type: 'monthly' | 'yearly') {
+    return this.dealsService.getForecastValues(type);
   }
 
   @Get('pipeline')
