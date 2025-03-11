@@ -14,5 +14,6 @@ export class AuthDto {
   @IsOptional()
   name: string;
 
+  @IsOptional()
   role: Role;
 }
