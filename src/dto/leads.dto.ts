@@ -15,7 +15,10 @@ export class CreateLeadDto {
   @IsOptional()
   company: string;
 
+  @IsOptional()
   status: LeadStatus;
+
+  ownerId?: number;
 }
 
 export class UpdateLeadDto {

@@ -1,5 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { DealStage, Prisma } from '@prisma/client';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { DealStage, Prisma, Role } from '@prisma/client';
 import { CreateDealDto, UpdateDealDto } from 'src/dto/deals.dto';
 import { NotificationsService } from 'src/notifications/notifications.service';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -11,7 +15,38 @@ export class DealsService {
     private notificationService: NotificationsService,
   ) {}
 
-  async createDeals(dto: CreateDealDto, user: number) {
+  private async filterDealsByRole(userId: number, userRole: Role) {
+    switch (userRole) {
+      case Role.ADMIN:
+        return this.prisma.deal.findMany();
+      case Role.SALES_MANAGER:
+        return this.prisma.deal.findMany({
+          where: {
+            owner: {
+              role: Role.SALES_REP, // Sales Managers can see deals of their team (Sales Reps)
+            },
+          },
+        });
+      case Role.SALES_REP:
+        return this.prisma.deal.findMany({
+          where: {
+            ownerId: userId, // Sales Reps can only see their own deals
+          },
+        });
+      default:
+        throw new ForbiddenException(
+          'You do not have permission to view deals.',
+        );
+    }
+  }
+
+  async createDeals(dto: CreateDealDto, userId: number, userRole: Role) {
+    if (userRole !== Role.ADMIN && dto.ownerId && dto.ownerId !== userId) {
+      throw new ForbiddenException('You can only create deals for yourself.');
+    }
+
+    const ownerId = dto.ownerId ?? userId;
+
     let closeProbability: number;
 
     switch (dto.stage) {
@@ -37,42 +72,75 @@ export class DealsService {
     const deal = await this.prisma.deal.create({
       data: {
         name: dto.name,
-        amount: dto.amount,
         dealValue,
         forecastValue,
         expectedCloseDate: dto.expectedCloseDate,
         closeProbability,
         stage: dto.stage,
-        ownerId: dto.ownerId,
+        ownerId,
       },
     });
-
-    this.notificationService.sendNotification(
-      user,
-      `A new deal "${deal.name}" has been created.`,
-      'DEAL_CREATED',
-    );
 
     return deal;
   }
 
-  async getDeals(search?: string) {
+  async getDealStagePercentages(userId: number, userRole: Role) {
+    const deals = await this.filterDealsByRole(userId, userRole);
+
+    if (deals.length === 0) {
+      console.log('No deals found for the user.');
+      return [];
+    }
+
+    const stageCounts = deals.reduce(
+      (acc, deal) => {
+        const stage = deal.stage;
+        acc[stage] = (acc[stage] || 0) + 1;
+        return acc;
+      },
+      {} as Record<DealStage, number>,
+    );
+
+    const totalDeals = deals.length;
+
+    const stagePercentages = Object.entries(stageCounts).map(
+      ([stage, count]) => ({
+        stage,
+        percentage: Math.round((count / totalDeals) * 100),
+      }),
+    );
+
+    return stagePercentages;
+  }
+
+  async getDeals(userId: number, userRole: Role, search?: string) {
     let deals;
 
     if (search) {
       deals = await this.prisma.deal.findMany({
         where: {
-          OR: [
-            search ? { name: { contains: search, mode: 'insensitive' } } : {},
-            search
-              ? {
-                  stage: {
-                    in: Object.values(DealStage).filter((s) =>
-                      s.toLowerCase().includes(search.toLowerCase()),
-                    ) as DealStage[],
-                  },
-                }
-              : {},
+          AND: [
+            {
+              OR: [
+                search
+                  ? { name: { contains: search, mode: 'insensitive' } }
+                  : {},
+                search
+                  ? {
+                      stage: {
+                        in: Object.values(DealStage).filter((s) =>
+                          s.toLowerCase().includes(search.toLowerCase()),
+                        ) as DealStage[],
+                      },
+                    }
+                  : {},
+              ],
+            },
+            userRole === Role.ADMIN
+              ? {}
+              : userRole === Role.SALES_MANAGER
+                ? { owner: { role: Role.SALES_REP } }
+                : { ownerId: userId },
           ],
         },
         include: {
@@ -80,48 +148,57 @@ export class DealsService {
             select: {
               id: true,
               name: true,
+              email: true,
             },
           },
         },
       });
     } else {
-      deals = await this.prisma.deal.findMany({
-        include: {
-          owner: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      });
+      deals = await this.filterDealsByRole(userId, userRole);
     }
 
     return { data: deals };
   }
 
-  async getDeal(id: string) {
-    return this.prisma.deal.findUnique({
-      where: {
-        id,
-      },
-      select: {
-        id: true,
-        name: true,
-        amount: true,
-        dealValue: true,
-        forecastValue: true,
-        expectedCloseDate: true,
-        closeProbability: true,
-        stage: true,
-        ownerId: true,
-      },
+  async getDeal(id: string, userId: number, userRole: Role) {
+    const deal = await this.prisma.deal.findUnique({
+      where: { id },
+      include: { owner: true },
     });
+
+    if (!deal) throw new NotFoundException('Deal not found');
+
+    if (
+      userRole !== Role.ADMIN &&
+      userRole === Role.SALES_REP &&
+      deal.ownerId !== userId
+    ) {
+      throw new ForbiddenException(
+        'You do not have permission to view this deal.',
+      );
+    }
+
+    return deal;
   }
 
-  async updateDeal(id: string, dto: UpdateDealDto) {
+  async updateDeal(
+    id: string,
+    dto: UpdateDealDto,
+    userId: number,
+    userRole: Role,
+  ) {
     const existingDeal = await this.prisma.deal.findUnique({ where: { id } });
     if (!existingDeal) throw new NotFoundException('Deal not found');
+
+    if (
+      userRole !== Role.ADMIN &&
+      userRole === Role.SALES_REP &&
+      existingDeal.ownerId !== userId
+    ) {
+      throw new ForbiddenException(
+        'You do not have permission to update this deal.',
+      );
+    }
 
     const closeProbability =
       dto.stage === DealStage.CLOSED_WON
@@ -141,130 +218,55 @@ export class DealsService {
     });
   }
 
-  async removeDeal(id: string) {
-    return this.prisma.deal.delete({
-      where: {
-        id,
-      },
-    });
-  }
+  async removeDeal(id: string, userId: number, userRole: Role) {
+    const existingDeal = await this.prisma.deal.findUnique({ where: { id } });
+    if (!existingDeal) throw new NotFoundException('Deal not found');
 
-  async getActiveDeals() {
-    return this.prisma.deal.findMany({
-      where: {
-        stage: { in: [DealStage.NEGOTIATION, DealStage.PROPOSAL_SENT] },
-      },
-    });
-  }
-
-  async getForecastValues(type: 'monthly' | 'yearly') {
-    const startDate = new Date();
-    startDate.setFullYear(
-      startDate.getFullYear() - (type === 'yearly' ? 11 : 1),
-    );
-
-    console.log('Start Date:', startDate); // Debugging log
-
-    // Fetch the data
-    const data = await this.prisma.deal.findMany({
-      where: {
-        expectedCloseDate: { gte: startDate },
-      },
-      select: {
-        expectedCloseDate: true,
-        forecastValue: true,
-      },
-    });
-
-    console.log('Fetched Data:', data); // Debugging log
-
-    const groupedData: Record<string, number[]> = {};
-
-    // Group data by month or year and push forecast values into an array
-    data.forEach(({ expectedCloseDate, forecastValue }) => {
-      const key =
-        type === 'monthly'
-          ? expectedCloseDate.toISOString().slice(0, 7) // 'YYYY-MM'
-          : expectedCloseDate.getFullYear().toString(); // 'YYYY'
-
-      console.log('Grouping Key:', key); // Debugging log
-
-      if (!groupedData[key]) {
-        groupedData[key] = [];
-      }
-      groupedData[key].push(forecastValue);
-    });
-
-    console.log('Grouped Data:', groupedData); // Debugging log
-
-    const result: { label: string; values: number[] }[] = [];
-
-    // Prepare the final result with labels and values arrays
-    for (let i = 0; i < 12; i++) {
-      const date = new Date();
-      date.setMonth(date.getMonth() - (type === 'monthly' ? i : i * 12));
-
-      const key =
-        type === 'monthly'
-          ? date.toISOString().slice(0, 7)
-          : date.getFullYear().toString();
-
-      const label =
-        type === 'monthly'
-          ? date.toLocaleString('default', { month: 'short' }) // "Jan", "Feb", etc.
-          : date.getFullYear().toString(); // "2024", "2025", etc.
-
-      console.log('Checking Label and Key:', label, key); // Debugging log
-
-      result.unshift({
-        label,
-        values: groupedData[key] || [], // Push an empty array if no forecast value for the period
-      });
+    if (
+      userRole !== Role.ADMIN &&
+      userRole === Role.SALES_REP &&
+      existingDeal.ownerId !== userId
+    ) {
+      throw new ForbiddenException(
+        'You do not have permission to delete this deal.',
+      );
     }
 
-    console.log('Final Result:', result); // Debugging log
-    return result;
+    return this.prisma.deal.delete({ where: { id } });
   }
 
-  async getDealStageDistribution() {
-    return this.prisma.deal.groupBy({
-      by: ['stage'],
-      _count: { _all: true },
-    });
-  }
+  async getMonthlyForecast(userId: number, userRole: Role) {
+    let whereClause = '';
 
-  async getCloseWons() {
-    return this.prisma.deal.findMany({
-      where: { stage: DealStage.CLOSED_WON },
-    });
-  }
-
-  async getPipeline() {
-    const deals = await this.prisma.deal.findMany({
-      select: {
-        id: true,
-        name: true,
-        stage: true,
-        expectedCloseDate: true,
-        forecastValue: true,
-      },
-      orderBy: {
-        createdAt: 'asc',
-      },
-    });
-
-    const pipeline = {
-      NEGOTIATION: [],
-      PROPOSAL_SENT: [],
-      CLOSED_WON: [],
-      CLOSED_LOST: [],
-    };
-
-    // Populate the pipeline categories
-    for (const deal of deals) {
-      pipeline[deal.stage].push(deal);
+    switch (userRole) {
+      case Role.ADMIN:
+        whereClause = '';
+        break;
+      case Role.SALES_MANAGER:
+        whereClause = `WHERE "ownerId" IN (SELECT id FROM "User" WHERE role = '${Role.SALES_REP}')`;
+        break;
+      case Role.SALES_REP:
+        whereClause = `WHERE "ownerId" = ${userId}`;
+        break;
+      default:
+        throw new ForbiddenException(
+          'You do not have permission to view the monthly forecast.',
+        );
     }
 
-    return pipeline;
+    return this.prisma.$queryRaw<
+      {
+        month: string;
+        totalForecastValue: number;
+      }[]
+    >(Prisma.sql`
+      SELECT 
+        TO_CHAR("expectedCloseDate", 'Month') AS month,
+        SUM("forecastValue") AS "totalForecastValue"
+      FROM "Deal"
+      ${Prisma.raw(whereClause)}
+      GROUP BY month
+      ORDER BY MIN("expectedCloseDate")
+    `);
   }
 }

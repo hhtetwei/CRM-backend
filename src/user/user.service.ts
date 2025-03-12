@@ -4,12 +4,36 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
+import * as argon from 'argon2';
 import { userDto } from 'src/dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class UserService {
   constructor(private prisma: PrismaService) {}
+
+  async createUser(dto: userDto) {
+    try {
+      const hashedPassword = await argon.hash('password');
+
+      const user = await this.prisma.user.create({
+        data: {
+          name: dto.name,
+          email: dto.email,
+          password: hashedPassword,
+          role: dto.role,
+        },
+        select: { id: true, email: true, name: true, role: true },
+      });
+      console.log(user);
+      return user;
+    } catch (error) {
+      if (error.code === 'P2002') {
+        throw new ConflictException('Email is already in use');
+      }
+      throw new InternalServerErrorException('Error creating user');
+    }
+  }
 
   async getUsers() {
     return await this.prisma.user.findMany({

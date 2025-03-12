@@ -15,9 +15,6 @@ export class CreateDealDto {
   @IsNotEmpty()
   name: string;
 
-  @IsNumber()
-  amount: number;
-
   @IsOptional()
   @IsNumber()
   dealValue?: number;

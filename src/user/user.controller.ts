@@ -5,11 +5,11 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { Roles } from 'src/decorators/roles.decorators';
-
 import { JwtGuard } from 'src/guards';
 import { RolesGuard } from 'src/guards/roles.guards';
 import { UserService } from './user.service';
@@ -21,6 +21,13 @@ export class UserController {
 
   @UseGuards(JwtGuard, RolesGuard)
   @Roles('ADMIN')
+  @Post()
+  createUser(@Body() dto: userDto) {
+    return this.userService.createUser(dto);
+  }
+
+  @UseGuards(JwtGuard, RolesGuard)
+  @Roles('ADMIN', 'SALES_REP', 'SALES_MANAGER')
   @Get('me')
   getMe(@Req() req: any) {
     return {

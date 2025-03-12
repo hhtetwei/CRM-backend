@@ -49,7 +49,6 @@ enum LeadStatus {
 model Deal {
   id               String   @id @default(uuid())
   name             String
-  amount           Float
   dealValue        Float?   
   forecastValue    Float?   
   expectedCloseDate DateTime? 

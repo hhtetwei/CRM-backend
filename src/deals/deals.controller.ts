@@ -14,58 +14,60 @@ import { DealsService } from './deals.service';
 import { CreateDealDto, UpdateDealDto } from 'src/dto/deals.dto';
 import { JwtGuard } from 'src/guards';
 
+import { Role } from '@prisma/client';
+import { RolesGuard } from 'src/guards/roles.guards';
+import { Roles } from 'src/decorators/roles.decorators';
+
 @Controller('deals')
+@UseGuards(JwtGuard, RolesGuard)
 export class DealsController {
   constructor(private dealsService: DealsService) {}
 
-  @UseGuards(JwtGuard)
   @Post()
+  @Roles(Role.ADMIN, Role.SALES_REP)
   createDeals(@Body() dto: CreateDealDto, @Request() req) {
-    return this.dealsService.createDeals(dto, req.user.id);
+    return this.dealsService.createDeals(dto, req.user.id, req.user.role);
   }
 
   @Get()
-  getDeals(@Query('search') search?: string) {
-    return this.dealsService.getDeals(search);
+  @Roles(Role.ADMIN, Role.SALES_MANAGER, Role.SALES_REP)
+  getDeals(@Query('search') search: string, @Request() req) {
+    return this.dealsService.getDeals(req.user.id, req.user.role, search);
   }
 
   @Get('forecast')
-  async getForecast(@Query('type') type: 'monthly' | 'yearly') {
-    return this.dealsService.getForecastValues(type);
+  @Roles(Role.ADMIN, Role.SALES_MANAGER)
+  async getForecast(@Request() req) {
+    return this.dealsService.getMonthlyForecast(req.user.id, req.user.role);
   }
-
-  @Get('pipeline')
-  getPipeline() {
-    return this.dealsService.getPipeline();
-  }
-
-  @Get('/deal-stage-distribution')
-  getDealStageDistribution() {
-    return this.dealsService.getDealStageDistribution();
+  @Get('stage-percentages')
+  @Roles(Role.ADMIN, Role.SALES_MANAGER)
+  async getDealStagePercentages(@Request() req) {
+    return this.dealsService.getDealStagePercentages(
+      req.user.id,
+      req.user.role,
+    );
   }
 
   @Get(':id')
-  getDeal(@Param('id') id: string) {
-    return this.dealsService.getDeal(id);
-  }
-
-  @Get('active')
-  getActiveDeals() {
-    return this.dealsService.getActiveDeals();
-  }
-
-  @Get('closed-won')
-  getCloseWons() {
-    return this.dealsService.getCloseWons();
+  @Roles(Role.ADMIN, Role.SALES_MANAGER, Role.SALES_REP)
+  getDeal(@Param('id') id: string, @Request() req) {
+    return this.dealsService.getDeal(id, req.user.id, req.user.role);
   }
 
   @Patch(':id')
-  updateDeal(@Param('id') id: string, @Body() dto: UpdateDealDto) {
-    return this.dealsService.updateDeal(id, dto);
+  @Roles(Role.ADMIN, Role.SALES_REP)
+  updateDeal(
+    @Param('id') id: string,
+    @Body() dto: UpdateDealDto,
+    @Request() req,
+  ) {
+    return this.dealsService.updateDeal(id, dto, req.user.id, req.user.role);
   }
 
   @Delete(':id')
-  removeDeal(@Param('id') id: string) {
-    return this.dealsService.removeDeal(id);
+  @Roles(Role.ADMIN, Role.SALES_REP) // Only Admins and Sales Reps can delete deals
+  removeDeal(@Param('id') id: string, @Request() req) {
+    return this.dealsService.removeDeal(id, req.user.id, req.user.role);
   }
 }
