@@ -128,6 +128,37 @@ export class LeadsService {
     return lead;
   }
 
+  async getLeadStatusPercentages(userId: number, userRole: Role) {
+    const leads = await this.filterLeadsByRole(userId, userRole);
+
+    if (leads.length === 0) {
+      console.log('No leads found for the user.');
+      return [];
+    }
+
+    const statusCounts = Object.values(LeadStatus).reduce(
+      (acc, status) => {
+        acc[status] = 0;
+        return acc;
+      },
+      {} as Record<LeadStatus, number>,
+    );
+
+    leads.forEach((lead) => {
+      statusCounts[lead.status]++;
+    });
+
+    const totalLeads = leads.length;
+
+    const statusPercentages = Object.entries(statusCounts).map(
+      ([status, count]) => ({
+        status,
+        percentage: Math.round((count / totalLeads) * 100),
+      }),
+    );
+
+    return statusPercentages;
+  }
   async updateLead(
     id: string,
     dto: CreateLeadDto,

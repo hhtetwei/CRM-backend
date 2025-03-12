@@ -34,6 +34,14 @@ export class LeadsController {
     return this.leadsService.getLeads(req.user.id, req.user.role, search);
   }
 
+  @Get('status-percentages')
+  @Roles(Role.ADMIN, Role.SALES_MANAGER, Role.SALES_REP)
+  async getLeadStatusPercentages(@Request() req) {
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    return this.leadsService.getLeadStatusPercentages(userId, userRole);
+  }
+
   @Get(':id')
   @Roles(Role.ADMIN, Role.SALES_MANAGER, Role.SALES_REP) // All roles can access, but data is filtered
   getLeadById(@Param('id') id: string, @Request() req) {
